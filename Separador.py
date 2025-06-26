@@ -8,59 +8,65 @@ from datetime import datetime
 import shutil
 import tempfile
 from glob import glob
+import tkinter as tk
+from tkinter import filedialog
 
 # ==============================================================================
 # --- ÁREA DE CONFIGURAÇÃO PRINCIPAL ---
 # ==============================================================================
 CONFIG = {
-    "PASTA_RAIZ": r"C:\Users\Matheus Duda\Downloads\thais",
-    "PASTA_SAIDA_GERAL": r"C:\Users\Matheus Duda\Downloads\thais\Apolices_Processadas",
+    "PASTA_SAIDA_NOME": "Apolices_Processadas",
     "TEMPLATE_CERT_ZIP": "CERTIFICADOS_{identificador}.zip",
     "TEMPLATE_PLAN_ZIP": "PLANILHAS {identificador}.zip",
     "TEMPLATE_PDF_INTERNO": "CERTIFICADOS_{tipo}_{identificador}.pdf",
     "TEMPLATE_PLANILHA_INTERNA": "{tipo}_1X {identificador}.csv",
-
-    # --- CONFIGURAÇÕES DE LEITURA ---
     "TIPO_ARQUIVO_PLANILHA": "csv",
     "CSV_DELIMITADOR": ";",
     "ENCODING_CSV": "latin-1",
-
-    # --- CONFIGURAÇÕES DA APÓLICE ---
     "PAGINAS_POR_APOLICE": 3,
     "MAPEAMENTO_COLUNAS": {
         "loccodigo": "ATIVIDADE",
         "nome_segurado": "NOMESEGURADOITEM",
         "cnpj": "CNPJ"
     },
-    # O padrão do nome agora usa apenas o 'loccodigo' (número do contrato)
-    "PADRAO_NOME_ARQUIVO_SAIDA": "{loccodigo}.pdf" # <-- AJUSTADO AQUI
+    "PADRAO_NOME_ARQUIVO_SAIDA": "{loccodigo}.pdf"
 }
 # ==============================================================================
 # --- FIM DA CONFIGURAÇÃO ---
 # ==============================================================================
 
+def selecionar_pasta_matriz():
+    """Abre uma janela para o usuário selecionar a pasta principal."""
+    root = tk.Tk()
+    root.withdraw()
+    print("Por favor, selecione a pasta matriz que contém os arquivos ZIP...")
+    pasta_selecionada = filedialog.askdirectory(title="Selecione a Pasta Matriz (a que contém os arquivos ZIP)")
+    root.destroy()
+    return pasta_selecionada
 
 def configurar_log():
-    os.makedirs(CONFIG["PASTA_SAIDA_GERAL"], exist_ok=True)
-    log_filename = os.path.join(CONFIG["PASTA_SAIDA_GERAL"], f"log_geral_{datetime.now():%Y%m%d_%H%M%S}.txt")
+    pasta_saida = CONFIG["PASTA_SAIDA_GERAL"]
+    os.makedirs(pasta_saida, exist_ok=True)
+    log_filename = os.path.join(pasta_saida, f"log_geral_{datetime.now():%Y%m%d_%H%M%S}.txt")
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', handlers=[logging.FileHandler(log_filename, 'w', 'utf-8'), logging.StreamHandler()])
 
 def sanitizar_nome_arquivo(nome):
     return re.sub(r'[\\/*?:"<>|]', "", str(nome))
 
 def encontrar_lotes_processamento():
-    logging.info(f"Buscando lotes de processamento em: {CONFIG['PASTA_RAIZ']}")
+    pasta_raiz = CONFIG["PASTA_RAIZ"]
+    logging.info(f"Buscando lotes de processamento em: {pasta_raiz}")
     lotes = {}
     prefixo_cert = CONFIG["TEMPLATE_CERT_ZIP"].split('{')[0]
     sufixo_cert = ".zip"
-    cert_zips = glob(os.path.join(CONFIG["PASTA_RAIZ"], f"{prefixo_cert}*{sufixo_cert}"))
+    cert_zips = glob(os.path.join(pasta_raiz, f"{prefixo_cert}*{sufixo_cert}"))
 
     for cert_zip_path in cert_zips:
         nome_arquivo_cert = os.path.basename(cert_zip_path)
         try:
             identificador = nome_arquivo_cert[len(prefixo_cert):-len(sufixo_cert)]
             nome_planilha_zip = CONFIG["TEMPLATE_PLAN_ZIP"].format(identificador=identificador)
-            planilha_zip_esperado = os.path.join(CONFIG["PASTA_RAIZ"], nome_planilha_zip)
+            planilha_zip_esperado = os.path.join(pasta_raiz, nome_planilha_zip)
 
             if os.path.exists(planilha_zip_esperado):
                 logging.info(f"Lote encontrado: '{identificador}' (Certificados: '{nome_arquivo_cert}', Planilhas: '{nome_planilha_zip}')")
@@ -127,15 +133,12 @@ def processar_pdf_individual(pdf_path, planilha_path, identificador, tipo, relat
                 if not all([loccodigo_bruto, nome_segurado]) or loccodigo_bruto == "CODIGO_NAO_INFORMADO" or nome_segurado == "NOME_NAO_INFORMADO":
                     raise ValueError("Dados essenciais (ATIVIDADE, NOMESEGURADOITEM) estão faltando na linha.")
 
-                # --- LÓGICA DE FORMATAÇÃO DO NOME DO ARQUIVO ---
-                # Remove os caracteres 'T' e '0' do início do código do contrato
                 loccodigo_formatado = loccodigo_bruto.lstrip('T0')
-
-                # Cria o nome do arquivo final usando o código formatado
                 nome_final = CONFIG["PADRAO_NOME_ARQUIVO_SAIDA"].format(loccodigo=loccodigo_formatado)
-                # --- FIM DA LÓGICA DE FORMATAÇÃO ---
                 
-                pasta_destino = os.path.join(CONFIG["PASTA_SAIDA_GERAL"], identificador, tipo, cnpj)
+                # --- LINHA ALTERADA ---
+                # O caminho de destino agora não inclui mais a pasta do CNPJ
+                pasta_destino = os.path.join(CONFIG["PASTA_SAIDA_GERAL"], identificador, tipo)
                 os.makedirs(pasta_destino, exist_ok=True)
                 
                 escritor = PdfWriter()
@@ -154,9 +157,22 @@ def processar_pdf_individual(pdf_path, planilha_path, identificador, tipo, relat
         relatorio_geral.append({"Lote": identificador, "Tipo": tipo, "Status": "Erro Fatal", "Detalhe": str(e)})
 
 def main():
+    pasta_matriz = selecionar_pasta_matriz()
+    if not pasta_matriz:
+        print("Nenhuma pasta foi selecionada. O programa será encerrado.")
+        return
+        
+    CONFIG["PASTA_RAIZ"] = pasta_matriz
+    CONFIG["PASTA_SAIDA_GERAL"] = os.path.join(pasta_matriz, CONFIG["PASTA_SAIDA_NOME"])
+    
     configurar_log()
+    
     lotes = encontrar_lotes_processamento()
-    if not lotes: return
+    if not lotes: 
+        logging.info("Nenhum lote válido para processar. Encerrando.")
+        input("Pressione Enter para fechar...")
+        return
+        
     relatorio_geral = []
     with tempfile.TemporaryDirectory(dir=CONFIG["PASTA_RAIZ"], prefix="extracao_temp_") as temp_dir:
         logging.info(f"Usando pasta temporária: {temp_dir}")
