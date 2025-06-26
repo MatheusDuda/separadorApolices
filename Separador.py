@@ -29,11 +29,11 @@ CONFIG = {
     "PAGINAS_POR_APOLICE": 3,
     "MAPEAMENTO_COLUNAS": {
         "loccodigo": "ATIVIDADE",
-        "nome_segurado": "NOMESEGURADOITEM", # <-- AJUSTADO AQUI
+        "nome_segurado": "NOMESEGURADOITEM",
         "cnpj": "CNPJ"
     },
-    # Padrão de nome simplificado para usar apenas colunas confirmadas
-    "PADRAO_NOME_ARQUIVO_SAIDA": "{nome_segurado}_{loccodigo}.pdf"
+    # O padrão do nome agora usa apenas o 'loccodigo' (número do contrato)
+    "PADRAO_NOME_ARQUIVO_SAIDA": "{loccodigo}.pdf" # <-- AJUSTADO AQUI
 }
 # ==============================================================================
 # --- FIM DA CONFIGURAÇÃO ---
@@ -122,12 +122,19 @@ def processar_pdf_individual(pdf_path, planilha_path, identificador, tipo, relat
                 dados = {chave: linha.get(valor) for chave, valor in colunas_mapeadas.items()}
                 cnpj = sanitizar_nome_arquivo(dados.get("cnpj", "CNPJ_NAO_INFORMADO"))
                 nome_segurado = sanitizar_nome_arquivo(dados.get("nome_segurado", "NOME_NAO_INFORMADO"))
-                loccodigo = sanitizar_nome_arquivo(dados.get("loccodigo", "CODIGO_NAO_INFORMADO"))
+                loccodigo_bruto = sanitizar_nome_arquivo(dados.get("loccodigo", "CODIGO_NAO_INFORMADO"))
 
-                if not all([loccodigo, nome_segurado]) or loccodigo == "CODIGO_NAO_INFORMADO" or nome_segurado == "NOME_NAO_INFORMADO":
+                if not all([loccodigo_bruto, nome_segurado]) or loccodigo_bruto == "CODIGO_NAO_INFORMADO" or nome_segurado == "NOME_NAO_INFORMADO":
                     raise ValueError("Dados essenciais (ATIVIDADE, NOMESEGURADOITEM) estão faltando na linha.")
 
-                nome_final = CONFIG["PADRAO_NOME_ARQUIVO_SAIDA"].format(nome_segurado=nome_segurado, loccodigo=loccodigo)
+                # --- LÓGICA DE FORMATAÇÃO DO NOME DO ARQUIVO ---
+                # Remove os caracteres 'T' e '0' do início do código do contrato
+                loccodigo_formatado = loccodigo_bruto.lstrip('T0')
+
+                # Cria o nome do arquivo final usando o código formatado
+                nome_final = CONFIG["PADRAO_NOME_ARQUIVO_SAIDA"].format(loccodigo=loccodigo_formatado)
+                # --- FIM DA LÓGICA DE FORMATAÇÃO ---
+                
                 pasta_destino = os.path.join(CONFIG["PASTA_SAIDA_GERAL"], identificador, tipo, cnpj)
                 os.makedirs(pasta_destino, exist_ok=True)
                 
